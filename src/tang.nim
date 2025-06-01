@@ -3,27 +3,27 @@ import sequtils
 import threadpool
 
 
-#这是语法糖库 -- tang.nim
-#<-符号用于构建for循环,包括单变量,元组变量for循环
-#<-也可以用于for循环笛卡尔嵌套,以及按步循环
-#<-还是基于collect的列表生成符,支持<-的loop操作以及bool操作filter,默认and,手动or
-#<-还支持add操作简化,以及return操作模拟
-#<-可以作为batch fn宏的简写
-#<-还可以作为fn宏的简写
-#->可以一定程度上作为循环<-的对称符号
-#<<-用于作为<-循环的扩展选项,可以为<-循环增加属性,理论上可以自由无限扩展叠加
-#<~为类型确定符,只有确定值的类型才能返回,可以与<-联动使用
-#->是sugar库中的符号,用于方便表明函数类型
-#=>是sugar库中的符号,用于方便表明闭包函数
-#:=是短变量声明,=:是海象声明符,<=>是大小判断符
-#:>,>:表明可变量声明
-#match是模式识别(暂时仅支持初级匹配),with是协助多参函数
-#fn提供函数式语言的调用方法与定义方法
-#batch可以提供批量操作
-#对于for循环,由于有块的区分,卫生宏几乎没必要
-#?运算符提供了类C语法的?:三元运算符
-#?.提供空安全调用
-#.^为级联操作符,返回级联后结果,^.无返回值
+# 这是语法糖库 -- tang.nim
+# <-符号用于构建for循环,包括单变量,元组变量for循环
+# <-也可以用于for循环笛卡尔嵌套,以及按步循环
+# <-还是基于collect的列表生成符,支持<-的loop操作以及bool操作filter,默认and,手动or
+# <-还支持add操作简化,以及return操作模拟
+# <-可以作为batch fn宏的简写
+# <-还可以作为fn宏的简写
+# ->可以一定程度上作为循环<-的对称符号
+# <<-用于作为<-循环的扩展选项,可以为<-循环增加属性,理论上可以自由无限扩展叠加
+# <~为类型确定符,只有确定值的类型才能返回,可以与<-联动使用
+# ->是sugar库中的符号,用于方便表明函数类型
+# =>是sugar库中的符号,用于方便表明闭包函数
+# :=是短变量声明,=:是海象声明符,<=>是大小判断符
+# :>,>:表明可变量声明
+# match是模式识别(暂时仅支持初级匹配),with是协助多参函数
+# fn提供函数式语言的调用方法与定义方法
+# batch可以提供批量操作
+# 对于for循环,由于有块的区分,卫生宏几乎没必要
+# ?运算符提供了类C语法的?:三元运算符
+# ?.提供空安全调用
+# .^为级联操作符,返回级联后结果,^.无返回值
 
 
 proc generateLoops(vars, iters: seq[NimNode], body: NimNode): NimNode =
@@ -79,27 +79,35 @@ macro `<-`*(left,right,body)=
     (x,y)<-[(1,2),(3,4),(5,6)]:
       echo x," ",y
     #支持步长,对于..有countUp优化
-    x<-1..22<-3:
+    #支持属性添加
+    x<-1..22<-3.step<-parallel:
       echo x
   if left.kind == nnkInfix and eqIdent(left[0],"<-"):
-    #嵌套<-用于步长操控
-    if left[2].kind==nnkInfix and eqIdent(left[2][0],".."):
-      #对步长的countUp优化
-      let l=left[1]
-      let l1=left[2][1]
-      let l2=left[2][2]
-      return quote do:
-        for `l` in countup(`l1`,`l2`,`right`):
-          `body`
-    let loopFlag=genSym(nskVar,"step_flag")
-    return newTree(nnkStmtList,newTree(nnkBlockStmt,newEmptyNode(),newTree(nnkStmtList,
-        newTree(nnkVarSection,newTree(nnkIdentDefs,loopFlag,newEmptyNode(),newIntLitNode 0)),
-        newTree(nnkInfix,ident "<-",left[1],left[2],newTree(nnkStmtList,
-            newTree(nnkIfStmt,newTree(nnkElifBranch,newTree(nnkInfix,ident "==",loopFlag,newIntLitNode 0),body)),
-            newTree(nnkCommand,ident "inc",loopFlag),
-            newTree(nnkAsgn,loopFlag,newTree(nnkInfix,ident "mod",loopFlag,right))
-        ))#生成步长循环
-    )))
+    let funname=case right.kind:
+      of nnkIdent:
+        right
+      of nnkCall:
+        right[0]
+      of nnkCommand:
+        right[0]
+      of nnkDotExpr:
+        right
+      else: error "Error: invalid syntax"
+    var fun=newTree(nnkCall,funname)
+    case right.kind:
+      of nnkIdent:discard
+      of nnkCall:
+        for x in right[1..^1]:
+          fun.add x
+      of nnkCommand:
+        for x in right[1..^1]:
+          fun.add x
+      of nnkDotExpr:discard
+      else: error "Error: invalid syntax"
+    fun.add left
+    fun.add body
+    return quote do:
+      `fun`
   if right.kind != nnkTupleConstr:
     #一般的for循环
     if left.kind==nnkTupleConstr:
@@ -138,6 +146,28 @@ macro parallel*(left,body)=
         newEmptyNode(),newTree(nnkIdentDefs,newTree(nnkAccQuoted,lopname),ident "auto",newEmptyNode())),newTree(nnkPragma,ident "thread"),
         newEmptyNode(),newStmtList(newTree(nnkLetSection,assignHelp(l,newTree(nnkAccQuoted,lopname))),body))
   return newBlockStmt(newEmptyNode(),newStmtList(p,t,newCall(ident"sync")))
+macro step*(s:int,left,body)=
+  if left.kind == nnkInfix and eqIdent(left[0],"<-"):
+  #嵌套<-用于步长操控
+    if left[2].kind==nnkInfix and eqIdent(left[2][0],".."):
+      #对步长的countUp优化
+      let l=left[1]
+      let l1=left[2][1]
+      let l2=left[2][2]
+      return quote do:
+        for `l` in countup(`l1`,`l2`,`s`):
+          `body`
+    let loopFlag=genSym(nskVar,"step_flag")
+    return newTree(nnkStmtList,newTree(nnkBlockStmt,newEmptyNode(),newTree(nnkStmtList,
+        newTree(nnkVarSection,newTree(nnkIdentDefs,loopFlag,newEmptyNode(),newIntLitNode 0)),
+        newTree(nnkInfix,ident "<-",left[1],left[2],newTree(nnkStmtList,
+            newTree(nnkIfStmt,newTree(nnkElifBranch,newTree(nnkInfix,ident "==",loopFlag,newIntLitNode 0),body)),
+            newTree(nnkCommand,ident "inc",loopFlag),
+            newTree(nnkAsgn,loopFlag,newTree(nnkInfix,ident "mod",loopFlag,s))
+        ))#生成步长循环
+    )))
+  else:
+    error "Error: invalid step syntax"
 macro genlist(val,gen):untyped=
   #生成收集器
   let fits = gen.children.toSeq
@@ -257,37 +287,6 @@ template `->`*(a,b,c)=
       echo x
     #展开为x<-1..21<-3:echo x
   b<-a:c
-macro `<<-`*(left,right,body): untyped =
-  #<-的扩展工具
-  #可以使扩展有更好的调用方式
-  runnableExamples:
-    x<-1..10<<-parallel:echo x
-    #等价于
-    parallel x<-1..10:echo x
-  expectKind left,nnkInfix
-  if left[0]==ident"<-" or left[0]==ident"<<-":
-    let funname=case right.kind:
-      of nnkIdent:
-        right
-      of nnkCall:
-        right[0]
-      of nnkCommand:
-        right[0]
-      else: error "Error: invalid syntax"
-    var fun=newTree(nnkCall,funname)
-    case right.kind:
-      of nnkIdent:discard
-      of nnkCall:
-        fun<-x<-(x<-right[1..^1])
-      of nnkCommand:
-        fun<-x<-(x<-right[1..^1])
-      else: error "Error: invalid syntax"
-    fun<-left<-body
-    quote do:
-      `fun`
-  else:
-    error "Error: invalid syntax"
-
 template `<~`*(val,ty):untyped=
   #类型判断符
   block:
@@ -662,5 +661,15 @@ dumpTree:
 # <-> <=>✔ <~> =>✔
 # <| |> <|> </> </ />
 # <$> ~@
+
+
+
+
+
+
+
+
+
+
 
 
