@@ -13,8 +13,8 @@ x<-1..10: #等价 for x in 1..10:
   discard
 (x,y)<-(1..3,4..6):#等价 for x in 1..3:for y in 4..6:
   discard
-x<-1..10<-3: #等价 for x in countup(1,10,3):
-  discard
+x<-1..10<-3.step: #等价 for x in countup(1,10,3):
+  discard         #等价 step(3,x<-1..10,:discard)
 
 x:=1 #等价 let x = 1
 y:>1 #等价 var x = 1
@@ -33,8 +33,8 @@ batch fn add list:
   10
 echo list  #@[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-x<-1..10<<-parallel:#<<-用于扩展,可自行扩展
-  discard #等于 parallel x<-1..10:discard
+x<-1..10<-parallel:#<-用于扩展属性,可自行扩展
+  discard          #等于 parallel x<-1..10:discard
 x<-1..10<~int:#<~可判断x类型
   discard
 
