@@ -81,10 +81,6 @@ macro `<-`*(left,right,body)=
     #支持步长,对于..有countUp优化
     x<-1..22<-3:
       echo x
-    (x,y)<-(1..5,2..6)<-parallel:
-      echo x," ",y
-    x<-1..21<-3<-parallel:
-      echo x
   if left.kind == nnkInfix and eqIdent(left[0],"<-"):
     #嵌套<-用于步长操控
     if left[2].kind==nnkInfix and eqIdent(left[2][0],".."):
