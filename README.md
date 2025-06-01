@@ -1,6 +1,6 @@
 # tang-nim🔥 The elegant sugar in nim lang.
 
-tang is a library that gives you with convenient grammar sugar.
+tang is a library that gives you with convenient grammar sugar, especially in the for loop.
 
 ## Examples
 ```nim
