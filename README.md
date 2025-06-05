@@ -16,10 +16,8 @@ x<-1..10: #等价 for x in 1..10:
 x<-1..10<-3.step: #等价 for x in countup(1,10,3):
   discard         #等价 step(3,x<-1..10,:discard)
 
-x:=1 #等价 let x = 1
-y:>1 #等价 var x = 1
 
-list:>newSeq[int]()
+var list=newSeq[int]()
 list<-1 #等价 add(list,1)
 list<-2<-3<-4 #等价 add(list,1)...add(list,4)
 <-list: #等价 add(list,5);add(list,6)
