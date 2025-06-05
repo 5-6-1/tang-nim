@@ -2,7 +2,6 @@ include sugar
 import sequtils
 import threadpool
 
-
 # 这是语法糖库 -- tang.nim
 # <-符号用于构建for循环,包括单变量,元组变量for循环
 # <-也可以用于for循环笛卡尔嵌套
@@ -15,8 +14,7 @@ import threadpool
 # <~为类型确定符,只有确定值的类型才能返回,可以与<-联动使用
 # ->是sugar库中的符号,用于方便表明函数类型
 # =>是sugar库中的符号,用于方便表明闭包函数
-# :=是短变量声明,=:是海象声明符,<=>是大小判断符
-# :>,>:表明可变量声明
+# =:是海象声明符,<=>是大小判断符,>:表明可变量声明
 # match是模式识别(暂时仅支持初级匹配),with是协助多参函数
 # fn提供函数式语言的调用方法与定义方法
 # batch可以提供批量操作
@@ -82,25 +80,31 @@ macro `<-`*(left,right,body)=
     #支持属性添加
     x<-1..22<-3.step<-parallel:
       echo x
-  if left.kind == nnkInfix and eqIdent(left[0],"<-"):
-    let funname=case right.kind:
+  if left.kind == nnkInfix:
+    #对左侧操作符未进行限定,也就是说你不止可以识别<-,<~操作符
+    #还可以识别别的自定义操作符(判定可以放在函数中)
+    #不过如此操作定义难度大,还是不建议的
+    let rightin=case right.kind:
+      of nnkPar:right[0]
+      else: right
+    let funname=case rightin.kind:
       of nnkIdent:
-        right
+        rightin
       of nnkCall:
-        right[0]
+        rightin[0]
       of nnkCommand:
-        right[0]
+        rightin[0]
       of nnkDotExpr:
-        right
+        rightin
       else: error "Error: invalid syntax"
     var fun=newTree(nnkCall,funname)
-    case right.kind:
+    case rightin.kind:
       of nnkIdent:discard
       of nnkCall:
-        for x in right[1..^1]:
+        for x in rightin[1..^1]:
           fun.add x
       of nnkCommand:
-        for x in right[1..^1]:
+        for x in rightin[1..^1]:
           fun.add x
       of nnkDotExpr:discard
       else: error "Error: invalid syntax"
@@ -147,7 +151,10 @@ macro parallel*(left,body)=
         newEmptyNode(),newStmtList(newTree(nnkLetSection,assignHelp(l,newTree(nnkAccQuoted,lopname))),body))
   return newBlockStmt(newEmptyNode(),newStmtList(p,t,newCall(ident"sync")))
 macro step*(s:int,left,body)=
-  if left.kind == nnkInfix and eqIdent(left[0],"<-"):
+  runnableExamples:
+    3.step x<-1..22:
+      echo x
+  if left.kind == nnkInfix:
   #嵌套<-用于步长操控
     if left[2].kind==nnkInfix and eqIdent(left[2][0],".."):
       #对步长的countUp优化
@@ -168,6 +175,23 @@ macro step*(s:int,left,body)=
     )))
   else:
     error "Error: invalid step syntax"
+macro ty*(typ,iter,body)=
+  #类型判断循环
+  runnableExamples:
+    x<-1..10<-ty int:
+      echo x
+    x<-1..10<-float.ty:#类型不匹配,报错
+      echo x
+    (x,y)<-(1..3,4..5)<-parallel<-ty (int,int):
+      echo x," ",y
+  expectKind iter,nnkInfix
+  let l=getll iter
+  #用is判断类型
+  var newbody=newStmtList(newTree(nnkWhenStmt,newTree(nnkElifBranch,newTree(nnkPrefix,ident"not",newTree(nnkInfix,ident "is",l,typ)),
+          newStmtList(newTree(nnkRaiseStmt,newTree(nnkCall,ident"newException",ident"ValueError",newStrLitNode("Expected a " & $toStrLit(typ))))))))
+  for i in body:
+    newbody.add i
+  return newTree(nnkInfix,iter[0],iter[1],iter[2],newbody)
 macro genlist(val,gen):untyped=
   #生成收集器
   let fits = gen.children.toSeq
@@ -179,6 +203,7 @@ macro genlist(val,gen):untyped=
     eqleft=newSeq[NimNode]()
     eqright=newSeq[NimNode]()
   fit<-fits:
+    echo repr fit
     if fit.kind == nnkInfix and eqIdent(fit[0],"<-"):
       #循环器
       inc flen
@@ -200,7 +225,7 @@ macro genlist(val,gen):untyped=
       judges.add fit
   var body = newStmtList()
   (l,r)<-(eqleft,eqright):
-    body.add newTree(nnkInfix,ident":=",l,r)
+    body.add newTree(nnkCall,ident"letAssign",l,r)
   body.add val
   let juds = if judges.len!=0:newTree(nnkIfStmt,newTree(nnkElifBranch,generateAnd judges,body))else:body
   #循环套判断,判断套赋值,收集在最后
@@ -287,6 +312,10 @@ template `->`*(a,b,c)=
       echo x
     #展开为x<-1..21<-3:echo x
   b<-a:c
+template where*(j)=
+  if not j:continue
+
+
 template `<~`*(val,ty):untyped=
   #类型判断符
   block:
@@ -294,26 +323,9 @@ template `<~`*(val,ty):untyped=
       val
     else:
       raise newException(ValueError, "Expected a " & $ty)
-macro `<~`*(iter,ty,body)=
-  #类型判断循环
-  runnableExamples:
-    x<-1..10<~int:
-      echo x
-    x<-1..10<~float:#类型不匹配,报错
-      echo x
-    (x,y)<-(1..3,4..5)<-parallel<~(int,int):
-      echo x," ",y
-  expectKind iter,nnkInfix
-  expectIdent iter[0],"<-"
-  let l=getll iter
-  #用is判断类型
-  var newbody=newStmtList(newTree(nnkWhenStmt,newTree(nnkElifBranch,newTree(nnkPrefix,ident"not",newTree(nnkInfix,ident "is",l,ty)),
-          newStmtList(newTree(nnkRaiseStmt,newTree(nnkCall,ident"newException",ident"ValueError",newStrLitNode("Expected a " & $toStrLit(ty))))))))
-  for i in body:
-    newbody.add i
-  return newTree(nnkInfix,iter[0],iter[1],iter[2],newbody)
 
-macro `:=`*(left,right)=
+
+macro letAssign*(left,right)=
   runnableExamples:
     let x=1
     y:=2
@@ -331,7 +343,7 @@ macro `:=`*(left,right)=
     #直接赋值
     return quote do:
       let `left` = `right`
-macro `:>`*(left,right)=
+macro valAssign*(left,right)=
   runnableExamples:
     var x=1
     y:>2
@@ -357,7 +369,7 @@ template `=:`*(left,right): untyped =
       echo x
     else:
       echo "x is less than 2"
-  left:=right
+  letAssign left,right
   right#返回赋值结果
 template `>:`*(left,right): untyped =
   runnableExamples:
@@ -366,8 +378,9 @@ template `>:`*(left,right): untyped =
       echo x*x
     else:
       echo "x is greater than 2"
-  left:>right
+  valAssign left,right
   right#返回赋值结果
+
 
 proc `<=>`*[T](left,right:T): int8 =
   #大小比较
@@ -377,6 +390,7 @@ proc `<=>`*[T](left,right:T): int8 =
     1#左大
   else:
     0#相等
+
 
 template with*(args:varargs[untyped])=discard#match的服务函数
 macro match*(x,body)=
@@ -445,6 +459,7 @@ macro match*(x,body)=
     result.add tail
   else:
     error "Error: no covering all cases"
+
 
 macro hasReturnType(expr: untyped): bool =
   #判断是否有返回值
@@ -560,6 +575,7 @@ macro fn*(fun_and_args):untyped=
   else:
     error "Error: invalid syntax."
 
+
 proc insertDeep(fun,arg:NimNode):NimNode=
   #以fn形式链接fun与arg
   result=newTree(nnkCommand)
@@ -596,9 +612,11 @@ macro batch*(args,body):untyped=
   else:
     error "Error: invalid syntax."
 
+
 macro `?`*(judge,t,f):untyped=
   #?:三目运算符
   newTree(nnkIfStmt,newTree(nnkElifBranch,judge,newStmtList(t)),newTree(nnkElse,newBlockStmt(newEmptyNode(),f)))
+
 
 macro `?.`*(obj, field): untyped =
   #空安全调用
@@ -608,6 +626,7 @@ macro `?.`*(obj, field): untyped =
       let `tmp` = `obj`
       if `tmp`.isNil: nil
       else: `tmp`.`field`
+
 
 macro `.^`*(calls, fun): untyped =
   #级联操作符
@@ -624,6 +643,7 @@ macro `^.`*(calls, fun)=
     block:
       `call`<-`calls`:
         `call`.`fun`
+
 
 macro `~>`*(arg,fun):untyped=
   runnableExamples:
@@ -646,13 +666,9 @@ macro `~>`*(arg,fun):untyped=
     error "Error: invalid syntax."
 
 
-dumpTree:
-  x<-1..3<-3<<-a<<-b<<-c:d
-
-
 
 #✔功能实现度(前缀单参,前缀双参,中缀双参,中缀三参)
-# <-✔✔✔✔ <<- <-| <--
+# <-✔✔✔✔ <<-✔ <-| <--
 # ->✔✔ ->> |-> -->
 # <<= <=| <==
 # =>> |=> ==>
@@ -661,6 +677,11 @@ dumpTree:
 # <-> <=>✔ <~> =>✔
 # <| |> <|> </> </ />
 # <$> ~@
+
+
+
+
+
 
 
 
